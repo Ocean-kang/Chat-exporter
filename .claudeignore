@@ -1,0 +1,3 @@
+# 排除不需要发给 Claude 的文件
+README.md
+LICENSE
