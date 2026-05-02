@@ -2,69 +2,65 @@
 
 ## Project
 
-Chat Exporter (Data-Layer Extraction First)
+Chat Exporter (Browser Extension, Data-Layer First)
 
-This project extracts conversations from ChatGPT by reading internal structured data instead of DOM.
-
----
-
-## Hard Constraints (Must Follow)
-
-- NEVER use DOM parsing as primary method
-- ALWAYS attempt data-layer extraction first
-- DO NOT use querySelector unless explicitly asked
-- DO NOT output large code unless requested
-- DO NOT rewrite entire files for small changes
+Extract ChatGPT conversations via network interception (fetch/XHR), not DOM.
 
 ---
 
-## Token Efficiency Rules (Critical)
+## Hard Constraints
 
-- Only output changed code blocks, not full files
-- Prefer diffs over full rewrites
-- Keep responses under 200 lines unless necessary
-- Avoid repeating context already in repository
-- Use concise explanations
+- NEVER use DOM scraping as primary method
+- ALWAYS prefer network/data-layer extraction
+- DO NOT rewrite entire files
+- DO NOT output more than requested scope
+
+---
+
+## Token Efficiency Rules
+
+- Output only diffs or new files
+- Keep responses under 150 lines
+- Avoid repeating existing code
+- No explanations unless asked
 
 ---
 
 ## Architecture
 
-packages/
-  core/        → types and shared logic
-  parsers/     → platform-specific extraction
-  exporters/   → output formats
-  cli/         → entry point
+extension/        → browser extension
+packages/core     → types
+packages/parsers  → data extraction
+packages/exporters→ output formats
 
 ---
 
-## Data Source (ChatGPT)
+## Data Source
 
 Primary:
 
-window.__NEXT_DATA__
-
-Expected path:
-
-props.pageProps.conversation
+/backend-api/conversation/:id
 
 ---
 
-## Data Model
+## Parsing Rules
 
-```ts
-export type Role = "user" | "assistant" | "system";
+- Messages stored as DAG
+- Must reconstruct order via parentId
+- Ignore empty messages
+- Join content.parts with newline
 
-export interface Message {
-  id: string;
-  role: Role;
-  content: string;
-  createdAt?: number;
-  parentId?: string;
-}
+---
 
-export interface Conversation {
-  id: string;
-  title: string;
-  messages: Message[];
-}
+## Output Rules
+
+- Markdown must preserve code blocks
+- No truncation
+
+---
+
+## Anti-Patterns
+
+- querySelector scraping
+- PDF export logic
+- full file rewrites
