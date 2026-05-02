@@ -35,6 +35,19 @@ window.addEventListener("message", (e) => {
   }
 });
 
+// ── generateSafeFilename — sanitize title for cross-platform filesystem safety ──
+function generateSafeFilename(title) {
+  const sanitized = (title || "").trim()
+    .replace(/[\\/:*?"<>|]/g, "")   // remove filesystem-invalid chars
+    .replace(/\s+/g, " ")           // collapse whitespace
+    .slice(0, 60);                  // limit length
+
+  if (!sanitized) {
+    return "chatgpt-export-" + Date.now() + ".md";
+  }
+  return sanitized + ".md";
+}
+
 // ── parseConversation — extract ordered messages from API response DAG ──
 function parseConversation(conv) {
   if (!conv || !conv.mapping) {
@@ -195,7 +208,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     chrome.runtime.sendMessage({
       type: "DOWNLOAD",
       content: md,
-      filename: (window.__CHAT_DATA__.title || "chat").replace(/[^a-zA-Z0-9_-]/g, "_") + ".md",
+      filename: generateSafeFilename(window.__CHAT_DATA__.title),
     }).then(() => {
       console.log("[exporter:content] DOWNLOAD message sent");
       sendResponse({ ok: true, messageCount: messages.length });
