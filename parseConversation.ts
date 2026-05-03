@@ -35,24 +35,32 @@ export function parseConversation(conv: any) {
     if (typeof c === "string") return c;
     if (Array.isArray(c.parts)) {
       return c.parts
-        .map((p: any) => {
-          if (typeof p === "string") return p;
-          if (p && typeof p === "object") return p.text || "";
-          return "";
-        })
+        .map((p: any) => extractPartText(p))
+        .filter((t: string) => t.length > 0)
         .join("\n");
     }
     if (typeof c.text === "string") return c.text;
     if (Array.isArray(c)) {
       return c
-        .map((p: any) => {
-          if (typeof p === "string") return p;
-          if (p && typeof p === "object") return p.text || "";
-          return "";
-        })
+        .map((p: any) => extractPartText(p))
+        .filter((t: string) => t.length > 0)
         .join("\n");
     }
     return "";
+  }
+
+  function extractPartText(p: any): string {
+    if (typeof p === "string") return p;
+    if (!p || typeof p !== "object") return "";
+    // Skip non-text parts (image, file, audio references)
+    const ct = p.content_type;
+    if (ct && ct !== "text" && ct !== "code" && ct !== "execution_output" && ct !== "tether_browsing_display") return "";
+    return p.text || "";
+  }
+
+  function isTextOrCodeType(ct: string): boolean {
+    // Only text, code, and execution output — skip multimodal, tool_use, system_error
+    return ct === "text" || ct === "code" || ct === "execution_output" || ct === "tether_browsing_display";
   }
 
   for (const id in mapping) {
@@ -63,6 +71,10 @@ export function parseConversation(conv: any) {
     const role = msg.author?.role || msg.role || "unknown";
     // Skip system / tool messages
     if (role === "system" || role === "tool") continue;
+
+    // Skip non-text/code content types (file uploads, tool use, system errors)
+    const contentType = msg.content?.content_type;
+    if (contentType && !isTextOrCodeType(contentType)) continue;
 
     const content = extractContent(msg);
     if (!content && !msg.content) continue;

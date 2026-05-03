@@ -48,30 +48,36 @@ function parseConversation(conv) {
   console.log("[parse] mapping exists, keys:", Object.keys(mapping).length);
   const messages = {};
 
+  function extractPartText(p) {
+    if (typeof p === "string") return p;
+    if (!p || typeof p !== "object") return "";
+    const ct = p.content_type;
+    if (ct && ct !== "text" && ct !== "code" && ct !== "execution_output" && ct !== "tether_browsing_display") return "";
+    return p.text || "";
+  }
+
   function extractContent(msg) {
     const c = msg?.content;
     if (!c) return "";
     if (typeof c === "string") return c;
     if (Array.isArray(c.parts)) {
       return c.parts
-        .map((p) => {
-          if (typeof p === "string") return p;
-          if (p && typeof p === "object") return p.text || "";
-          return "";
-        })
+        .map((p) => extractPartText(p))
+        .filter((t) => t.length > 0)
         .join("\n");
     }
     if (typeof c.text === "string") return c.text;
     if (Array.isArray(c)) {
       return c
-        .map((p) => {
-          if (typeof p === "string") return p;
-          if (p && typeof p === "object") return p.text || "";
-          return "";
-        })
+        .map((p) => extractPartText(p))
+        .filter((t) => t.length > 0)
         .join("\n");
     }
     return "";
+  }
+
+  function isTextOrCodeType(ct) {
+    return ct === "text" || ct === "code" || ct === "execution_output" || ct === "tether_browsing_display";
   }
 
   for (const id in mapping) {
@@ -81,6 +87,9 @@ function parseConversation(conv) {
 
     const role = msg.author?.role || msg.role || "unknown";
     if (role === "system" || role === "tool") continue;
+
+    const contentType = msg.content?.content_type;
+    if (contentType && !isTextOrCodeType(contentType)) continue;
 
     const content = extractContent(msg);
     if (!content && !msg.content) continue;
@@ -121,12 +130,29 @@ function parseConversation(conv) {
   return ordered;
 }
 
+function makeConv(content_type, parts, role) {
+  if (role === undefined) role = "user";
+  return {
+    mapping: {
+      "root": { id: "root", message: null, parent: null },
+      "msg": {
+        id: "msg",
+        message: {
+          author: { role: role, name: null, metadata: {} },
+          create_time: 1714600000,
+          content: { content_type: content_type, parts: parts },
+        },
+        parent: "root",
+      },
+    },
+  };
+}
+
 // ── Run Tests ──
 console.log("=== TEST 1: Valid mapping ===");
 const result = parseConversation(mockConv);
 console.log("Result:", JSON.stringify(result, null, 2));
 
-// Assertions
 console.assert(result.length === 2, "FAIL: expected 2 messages, got " + result.length);
 console.assert(result[0]?.role === "user", "FAIL: first message should be user, got " + result[0]?.role);
 console.assert(result[1]?.role === "assistant", "FAIL: second message should be assistant, got " + result[1]?.role);
@@ -169,5 +195,75 @@ const sysConv = {
 const result5 = parseConversation(sysConv);
 console.assert(result5.length === 1, "FAIL: expected 1 message (system filtered), got " + result5.length);
 console.assert(result5[0]?.role === "user", "FAIL: remaining message should be user");
+
+console.log("\n=== TEST 6: Multimodal_text (file upload) filtered ===");
+const multiConv = makeConv("multimodal_text", ["Summarize this PDF", { content_type: "image_asset_pointer", asset_pointer: "file-abc" }]);
+const result6 = parseConversation(multiConv);
+console.assert(result6.length === 0, "FAIL: multimodal_text message should be filtered, got " + result6.length);
+
+console.log("\n=== TEST 7: Code message kept ===");
+const codeConv = makeConv("code", ["console.log('hello')"], "assistant");
+const result7 = parseConversation(codeConv);
+console.assert(result7.length === 1, "FAIL: code message should be kept, got " + result7.length);
+console.assert(result7[0]?.content.includes("console.log"), "FAIL: code content should be preserved");
+
+console.log("\n=== TEST 8: execution_output message kept ===");
+const execConv = makeConv("execution_output", ["hello\n"], "assistant");
+const result8 = parseConversation(execConv);
+console.assert(result8.length === 1, "FAIL: execution_output should be kept, got " + result8.length);
+
+console.log("\n=== TEST 9: system_error filtered ===");
+const errConv = makeConv("system_error", ["something went wrong"], "assistant");
+const result9 = parseConversation(errConv);
+console.assert(result9.length === 0, "FAIL: system_error should be filtered, got " + result9.length);
+
+console.log("\n=== TEST 10: tool_use filtered ===");
+const toolConv = makeConv("tool_use", ["{\"name\": \"search\"}"], "assistant");
+const result10 = parseConversation(toolConv);
+console.assert(result10.length === 0, "FAIL: tool_use should be filtered, got " + result10.length);
+
+console.log("\n=== TEST 11: Part-level image parts filtered ===");
+const mixedConv = {
+  mapping: {
+    "root": { id: "root", message: null, parent: null },
+    "msg": {
+      id: "msg",
+      message: {
+        author: { role: "user", name: null, metadata: {} },
+        create_time: 1714600000,
+        content: {
+          content_type: "text",
+          parts: [
+            "What is in this image?",
+            { content_type: "image_asset_pointer", asset_pointer: "img-xyz" },
+          ],
+        },
+      },
+      parent: "root",
+    },
+  },
+};
+const result11 = parseConversation(mixedConv);
+console.assert(result11.length === 1, "FAIL: text message with inline image should be kept, got " + result11.length);
+console.assert(result11[0]?.content === "What is in this image?", "FAIL: only text part should remain, got: " + result11[0]?.content);
+
+console.log("\n=== TEST 12: Message with null content_type (kept, content_type check skipped) ===");
+const noCtConv = {
+  mapping: {
+    "root": { id: "root", message: null, parent: null },
+    "msg": {
+      id: "msg",
+      message: {
+        author: { role: "user" },
+        create_time: 1714600000,
+        content: { parts: ["Hello world"] },
+      },
+      parent: "root",
+    },
+  },
+};
+const result12 = parseConversation(noCtConv);
+console.assert(result12.length === 1, "FAIL: message w/o content_type should be kept, got " + result12.length);
+console.assert(result12[0]?.content === "Hello world", "FAIL: content mismatch, got: " + result12[0]?.content);
 
 console.log("\n=== ALL TESTS PASSED ===");
